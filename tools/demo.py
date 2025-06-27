@@ -5,6 +5,7 @@
 import argparse
 import os
 import time
+import json
 from loguru import logger
 
 import cv2
@@ -82,6 +83,11 @@ def make_parser():
         default=False,
         action="store_true",
         help="Using TensorRT model for testing.",
+    )
+    parser.add_argument(
+        "--save_json",
+        default=False,
+        action="store_true"
     )
     return parser
 
@@ -182,6 +188,42 @@ class Predictor(object):
 
         vis_res = vis(img, bboxes, scores, cls, cls_conf, self.cls_names)
         return vis_res
+
+def print_json(predictor, path):
+    # COCO output format: { images: [{id: 0, filename: "x.jpg"}, ...], 
+    # annotations: [{id: 0, image_id: 0, bbox: [0 0 0 0], score: 0.35, class: 1}, ... ] }
+    if os.path.isdir(path):
+        files = get_image_list(path)
+    else:
+        files = [path]
+    files.sort()
+
+    img_list = []
+    ann_list = []
+    
+    for img_id, image_name in enumerate(files):
+        
+        outputs, img_info = predictor.inference(image_name)
+        ratio = img_info["ratio"]
+        
+        img_entry = {"id": img_id,
+                     "filename": image_name }
+        img_list.append(img_entry)
+        
+        for id, output in enumerate(outputs):
+            ann_entry = {"id": id,
+                         "image_id": img_id,
+                         "bbox": output[:4] / ratio,
+                         "cls": output[6],
+                         "score": output[4] * output[5] }
+            ann_list.append(ann_entry)
+
+    data_dict = { "images": img_list,
+                 "annotations": ann_list
+                }
+    
+    with open(f"{path}/results.json", w) as f:
+        json.dump(data_dict, f)
 
 
 def image_demo(predictor, vis_folder, path, current_time, save_result):
@@ -309,6 +351,8 @@ def main(exp, args):
     current_time = time.localtime()
     if args.demo == "image":
         image_demo(predictor, vis_folder, args.path, current_time, args.save_result)
+        if args.save_json:
+            print_json(predictor, args.path)
     elif args.demo == "video" or args.demo == "webcam":
         imageflow_demo(predictor, vis_folder, current_time, args)
 
